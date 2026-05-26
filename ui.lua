@@ -112,11 +112,11 @@ mainGui.ResetOnSpawn = false
 mainGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 mainGui.Parent = pGui
 
--- Main Window (340x220)
+-- Main Window (300x220)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "MainWindow"
-mainFrame.Size = UDim2.new(0, 340, 0, 220)
-mainFrame.Position = UDim2.new(0.5, -170, 0.5, -110)
+mainFrame.Size = UDim2.new(0, 300, 0, 220)
+mainFrame.Position = UDim2.new(0.5, -150, 0.5, -110)
 mainFrame.BackgroundColor3 = THEME.BG_DARK
 mainFrame.BorderSizePixel = 0
 mainFrame.Active = true
@@ -225,10 +225,10 @@ body.BorderSizePixel = 0
 body.Parent = mainFrame
 
 -- ═══════════════════════════════════════════
--- SIDEBAR (kiri)
+-- SIDEBAR (kiri) — lebih kecil karena cuma 2 tab
 -- ═══════════════════════════════════════════
 local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 68, 1, 0)
+sidebar.Size = UDim2.new(0, 60, 1, 0)
 sidebar.BackgroundColor3 = THEME.SIDEBAR
 sidebar.BorderSizePixel = 0
 sidebar.Parent = body
@@ -250,8 +250,8 @@ sidePad.Parent = sidebar
 -- CONTENT PANEL (kanan)
 -- ═══════════════════════════════════════════
 local contentPanel = Instance.new("Frame")
-contentPanel.Size = UDim2.new(1, -74, 1, 0)
-contentPanel.Position = UDim2.new(0, 74, 0, 0)
+contentPanel.Size = UDim2.new(1, -66, 1, 0)
+contentPanel.Position = UDim2.new(0, 66, 0, 0)
 contentPanel.BackgroundColor3 = THEME.BG_PANEL
 contentPanel.BorderSizePixel = 0
 contentPanel.ClipsDescendants = true
@@ -343,7 +343,7 @@ local function createTab(icon, name)
     createPage(name)
 
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 24)
+    btn.Size = UDim2.new(1, 0, 0, 40)
     btn.BackgroundTransparency = 1
     btn.BackgroundColor3 = THEME.BG_ACTIVE
     btn.Text = ""
@@ -352,23 +352,24 @@ local function createTab(icon, name)
     corner(btn, 8)
 
     local iconLbl = Instance.new("TextLabel")
-    iconLbl.Size = UDim2.new(0, 16, 1, 0)
-    iconLbl.Position = UDim2.new(0, 4, 0, 0)
+    iconLbl.Size = UDim2.new(1, 0, 0, 20)
+    iconLbl.Position = UDim2.new(0, 0, 0, 6)
     iconLbl.BackgroundTransparency = 1
     iconLbl.Text = icon
-    iconLbl.TextSize = 11
+    iconLbl.TextSize = 16
     iconLbl.Font = Enum.Font.GothamBold
+    iconLbl.TextXAlignment = Enum.TextXAlignment.Center
     iconLbl.Parent = btn
 
     local nameLbl = Instance.new("TextLabel")
-    nameLbl.Size = UDim2.new(1, -24, 1, 0)
-    nameLbl.Position = UDim2.new(0, 22, 0, 0)
+    nameLbl.Size = UDim2.new(1, 0, 0, 12)
+    nameLbl.Position = UDim2.new(0, 0, 0, 24)
     nameLbl.BackgroundTransparency = 1
     nameLbl.Text = name
     nameLbl.TextColor3 = THEME.TEXT_MUTED
     nameLbl.Font = Enum.Font.GothamSemibold
-    nameLbl.TextSize = 8
-    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+    nameLbl.TextSize = 7
+    nameLbl.TextXAlignment = Enum.TextXAlignment.Center
     nameLbl.Parent = btn
 
     btn.MouseButton1Click:Connect(function()
@@ -389,12 +390,11 @@ local function createTab(icon, name)
     return btn, pages[name]
 end
 
--- Buat 5 tab (tambah Hitbox)
-local mainTabBtn,    mainPage    = createTab("🏠", "Main")
-local islandTabBtn,  islandPage  = createTab("🗺️", "Island")
-local elementTabBtn, elementPage = createTab("✨", "Element")
-local miscTabBtn,    miscPage    = createTab("⚙️", "Misc")
-local hitboxTabBtn,  hitboxPage  = createTab("🎯", "Hitbox")    -- ← BARU
+-- ═══════════════════════════════════════════
+-- BUAT 2 TAB SAJA
+-- ═══════════════════════════════════════════
+local mainTabBtn,   mainPage   = createTab("🏠", "Main")
+local hitboxTabBtn, hitboxPage = createTab("🎯", "Hitbox")
 
 -- Aktifkan Main secara default
 switchTab("Main", mainTabBtn, "🏠")
@@ -430,7 +430,7 @@ end
 local function closeUI()
     isOpen = false
     for _, fn in pairs(closeListeners) do pcall(fn) end
-    tween(mainFrame, 0.2, {Size = UDim2.new(0, 340, 0, 0)}):Play()
+    tween(mainFrame, 0.2, {Size = UDim2.new(0, 300, 0, 0)}):Play()
     task.delay(0.2, function()
         mainFrame.Visible = false
         openBtn.Visible = true
@@ -440,8 +440,8 @@ end
 local function openUI()
     isOpen = true
     mainFrame.Visible = true
-    mainFrame.Size = UDim2.new(0, 340, 0, 0)
-    tween(mainFrame, 0.25, {Size = UDim2.new(0, 340, 0, 220)}):Play()
+    mainFrame.Size = UDim2.new(0, 300, 0, 0)
+    tween(mainFrame, 0.25, {Size = UDim2.new(0, 300, 0, 220)}):Play()
     openBtn.Visible = false
 end
 
@@ -449,8 +449,8 @@ closeBtn.MouseButton1Click:Connect(closeUI)
 openBtn.MouseButton1Click:Connect(openUI)
 
 -- Animasi pertama kali
-mainFrame.Size = UDim2.new(0, 340, 0, 0)
-tween(mainFrame, 0.35, {Size = UDim2.new(0, 340, 0, 220)}):Play()
+mainFrame.Size = UDim2.new(0, 300, 0, 0)
+tween(mainFrame, 0.35, {Size = UDim2.new(0, 300, 0, 220)}):Play()
 
 -- ═══════════════════════════════════════════
 -- ITEM BUILDER
@@ -552,16 +552,10 @@ return {
     makeDraggable = makeDraggable,
     mainGui       = mainGui,
     mainFrame     = mainFrame,
-    -- Pages per tab
     mainPage      = mainPage,
-    islandPage    = islandPage,
-    elementPage   = elementPage,
-    miscPage      = miscPage,
-    hitboxPage    = hitboxPage,    -- ← BARU
-    -- Helpers
+    hitboxPage    = hitboxPage,
     createToggle  = createToggle,
     createSection = createSection,
-    -- Open/close
     closeBtn      = closeBtn,
     openBtn       = openBtn,
     isOpen        = function() return isOpen end,
