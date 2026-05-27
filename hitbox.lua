@@ -1,6 +1,6 @@
 -- ╔══════════════════════════════════════════╗
 -- ║     TIOO BETA V1 — HITBOX TAB            ║
--- ║   Hitbox Size 1 (Normal) to 20 (Huge)    ║
+-- ║   ESP Box — Garis Putih, NO resize       ║
 -- ╚══════════════════════════════════════════╝
 
 local function init(page, THEME, tween, corner, stroke, mainGui)
@@ -9,95 +9,275 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local RunService       = game:GetService("RunService")
     local UserInputService = game:GetService("UserInputService")
     local player           = Players.LocalPlayer
+    local camera           = workspace.CurrentCamera
 
     local ORANGE = THEME.ORANGE or Color3.fromRGB(255, 160, 50)
     local GREEN  = THEME.GREEN  or Color3.fromRGB(50, 210, 120)
     local RED    = THEME.RED    or Color3.fromRGB(255, 70, 70)
+    local WHITE  = Color3.fromRGB(255, 255, 255)
 
     -- ═══════════════════════════════
     -- State
     -- ═══════════════════════════════
-    local hitboxEnabled = false
-    local hitboxSize    = 1
-    local connections   = {}
-    local originalSizes = {}
+    local hitboxEnabled     = false
+    local hitboxSize        = 1
+    local renderConn        = nil
+    local espBoxes          = {}   -- [UserId] = { container, top, bottom, left, right }
+    local playerConns       = {}   -- [UserId] = connection CharacterAdded
 
     -- ═══════════════════════════════
-    -- Core Logic
+    -- Warna berdasarkan size
     -- ═══════════════════════════════
-    local function applyHitbox(targetPlayer, size)
-        local char = targetPlayer.Character
-        if not char then return end
+    local function getBoxColor(val)
+        if val <= 1 then return WHITE
+        elseif val <= 7 then return ORANGE
+        else return RED end
+    end
+
+    -- ═══════════════════════════════
+    -- Buat / hapus ESP box
+    -- ═══════════════════════════════
+    local function createBox(uid)
+        if espBoxes[uid] then return end
+
+        local container = Instance.new("Frame")
+        container.Name = "HitboxESP_" .. uid
+        container.BackgroundTransparency = 1
+        container.BorderSizePixel = 0
+        container.Size = UDim2.new(0, 0, 0, 0)
+        container.Visible = false
+        container.ZIndex = 10
+        container.Parent = mainGui
+
+        local function line(name)
+            local f = Instance.new("Frame")
+            f.Name = name
+            f.BackgroundColor3 = WHITE
+            f.BorderSizePixel = 0
+            f.ZIndex = 10
+            f.Parent = container
+            return f
+        end
+
+        espBoxes[uid] = {
+            container = container,
+            top    = line("Top"),
+            bottom = line("Bottom"),
+            left   = line("Left"),
+            right  = line("Right"),
+        }
+    end
+
+    local function destroyBox(uid)
+        local b = espBoxes[uid]
+        if b then
+            b.container:Destroy()
+            espBoxes[uid] = nil
+        end
+    end
+
+    local function destroyAllBoxes()
+        for uid in pairs(espBoxes) do
+            destroyBox(uid)
+        end
+    end
+
+    -- ═══════════════════════════════
+    -- Hitung bounding box 3D → screen 2D
+    -- Menggunakan HumanoidRootPart sebagai pusat
+    -- dan estimasi ukuran karakter standar
+    -- ═══════════════════════════════
+    local function getScreenBox(char, sizeMultiplier)
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then return nil end
+
+        -- Kumpulkan semua part
+        local minX, minY =  math.huge,  math.huge
+        local maxX, maxY = -math.huge, -math.huge
+        local anyOn = false
+
         for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                local key = tostring(targetPlayer.UserId) .. "_" .. part.Name
-                if not originalSizes[key] then
-                    originalSizes[key] = part.Size
-                end
-                if size <= 1 then
-                    part.Size = originalSizes[key]
-                else
-                    local orig = originalSizes[key]
-                    part.Size = Vector3.new(orig.X * size, orig.Y * size, orig.Z * size)
-                end
-            end
-        end
-    end
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                -- Besar kotak = ukuran asli part × multiplier, TAPI part fisik tidak diubah
+                local cf = part.CFrame
+                -- Setengah ukuran setelah dikalikan multiplier
+                local hs = (part.Size * sizeMultiplier) * 0.5
 
-    local function restoreAll()
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= player then
-                pcall(function()
-                    local char = p.Character
-                    if not char then return end
-                    for _, part in ipairs(char:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            local key = tostring(p.UserId) .. "_" .. part.Name
-                            if originalSizes[key] then
-                                part.Size = originalSizes[key]
-                            end
-                        end
+                -- 8 sudut bounding box virtual
+                local corners = {
+                    cf:PointToWorldSpace(Vector3.new( hs.X,  hs.Y,  hs.Z)),
+                    cf:PointToWorldSpace(Vector3.new(-hs.X,  hs.Y,  hs.Z)),
+                    cf:PointToWorldSpace(Vector3.new( hs.X, -hs.Y,  hs.Z)),
+                    cf:PointToWorldSpace(Vector3.new(-hs.X, -hs.Y,  hs.Z)),
+                    cf:PointToWorldSpace(Vector3.new( hs.X,  hs.Y, -hs.Z)),
+                    cf:PointToWorldSpace(Vector3.new(-hs.X,  hs.Y, -hs.Z)),
+                    cf:PointToWorldSpace(Vector3.new( hs.X, -hs.Y, -hs.Z)),
+                    cf:PointToWorldSpace(Vector3.new(-hs.X, -hs.Y, -hs.Z)),
+                }
+
+                for _, wp in ipairs(corners) do
+                    local sp, onScreen = camera:WorldToViewportPoint(wp)
+                    if onScreen then
+                        anyOn = true
+                        if sp.X < minX then minX = sp.X end
+                        if sp.X > maxX then maxX = sp.X end
+                        if sp.Y < minY then minY = sp.Y end
+                        if sp.Y > maxY then maxY = sp.Y end
                     end
-                end)
+                end
             end
         end
-        originalSizes = {}
+
+        if not anyOn then return nil end
+
+        local vp = camera.ViewportSize
+        minX = math.clamp(minX, 0, vp.X)
+        minY = math.clamp(minY, 0, vp.Y)
+        maxX = math.clamp(maxX, 0, vp.X)
+        maxY = math.clamp(maxY, 0, vp.Y)
+
+        return minX, minY, maxX, maxY
     end
 
-    local function runLoop()
-        for _, c in ipairs(connections) do c:Disconnect() end
-        connections = {}
-        if not hitboxEnabled then
-            restoreAll()
-            return
-        end
-        local conn = RunService.Heartbeat:Connect(function()
+    -- ═══════════════════════════════
+    -- Render loop
+    -- ═══════════════════════════════
+    local function startRender()
+        if renderConn then renderConn:Disconnect() end
+
+        renderConn = RunService.RenderStepped:Connect(function()
             if not hitboxEnabled then return end
+
+            local col = getBoxColor(hitboxSize)
+            local T = 2  -- tebal garis px
+
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= player then
-                    pcall(function() applyHitbox(p, hitboxSize) end)
+                    local uid  = p.UserId
+                    local char = p.Character
+
+                    -- Pastikan box ada
+                    if not espBoxes[uid] then createBox(uid) end
+                    local b = espBoxes[uid]
+                    if not b then continue end
+
+                    if char and char:FindFirstChild("HumanoidRootPart") then
+                        local minX, minY, maxX, maxY = getScreenBox(char, hitboxSize)
+
+                        if minX then
+                            local w = math.max(maxX - minX, 4)
+                            local h = math.max(maxY - minY, 4)
+
+                            b.container.Visible  = true
+                            b.container.Position = UDim2.new(0, minX, 0, minY)
+                            b.container.Size     = UDim2.new(0, w, 0, h)
+
+                            b.top.BackgroundColor3    = col
+                            b.bottom.BackgroundColor3 = col
+                            b.left.BackgroundColor3   = col
+                            b.right.BackgroundColor3  = col
+
+                            b.top.Size      = UDim2.new(1, 0, 0, T)
+                            b.top.Position  = UDim2.new(0, 0, 0, 0)
+
+                            b.bottom.Size     = UDim2.new(1, 0, 0, T)
+                            b.bottom.Position = UDim2.new(0, 0, 1, -T)
+
+                            b.left.Size     = UDim2.new(0, T, 1, 0)
+                            b.left.Position = UDim2.new(0, 0, 0, 0)
+
+                            b.right.Size     = UDim2.new(0, T, 1, 0)
+                            b.right.Position = UDim2.new(1, -T, 0, 0)
+                        else
+                            b.container.Visible = false
+                        end
+                    else
+                        b.container.Visible = false
+                    end
                 end
             end
         end)
-        table.insert(connections, conn)
+    end
+
+    local function stopRender()
+        if renderConn then
+            renderConn:Disconnect()
+            renderConn = nil
+        end
+        destroyAllBoxes()
     end
 
     -- ═══════════════════════════════
-    -- SECTION HEADER
+    -- Track setiap player (termasuk respawn)
+    -- ═══════════════════════════════
+    local function setupPlayer(p)
+        if p == player then return end
+        local uid = p.UserId
+
+        -- Buat box sekarang kalau karakter sudah ada
+        if p.Character then
+            createBox(uid)
+        end
+
+        -- Disconnect kalau sudah ada
+        if playerConns[uid] then
+            playerConns[uid]:Disconnect()
+        end
+
+        -- CharacterAdded untuk handle respawn
+        playerConns[uid] = p.CharacterAdded:Connect(function()
+            destroyBox(uid)
+            task.wait(0.3)
+            if hitboxEnabled then
+                createBox(uid)
+            end
+        end)
+    end
+
+    local function cleanupPlayer(p)
+        local uid = p.UserId
+        if playerConns[uid] then
+            playerConns[uid]:Disconnect()
+            playerConns[uid] = nil
+        end
+        destroyBox(uid)
+    end
+
+    -- Setup semua player yang sudah ada
+    for _, p in ipairs(Players:GetPlayers()) do
+        setupPlayer(p)
+    end
+
+    Players.PlayerAdded:Connect(function(p)
+        setupPlayer(p)
+    end)
+
+    Players.PlayerRemoving:Connect(function(p)
+        cleanupPlayer(p)
+    end)
+
+    -- Local respawn — restart render
+    player.CharacterAdded:Connect(function()
+        if hitboxEnabled then
+            task.wait(0.5)
+            startRender()
+        end
+    end)
+
+    -- ═══════════════════════════════
+    -- UI — SECTION HEADER
     -- ═══════════════════════════════
     local secLabel = Instance.new("TextLabel")
     secLabel.Size = UDim2.new(1, 0, 0, 18)
     secLabel.BackgroundTransparency = 1
-    secLabel.Text = "  HITBOX EXPANDER"
+    secLabel.Text = "  HITBOX ESP BOX"
     secLabel.TextColor3 = ORANGE
     secLabel.Font = Enum.Font.GothamBold
     secLabel.TextSize = 9
     secLabel.TextXAlignment = Enum.TextXAlignment.Left
     secLabel.Parent = page
 
-    -- ═══════════════════════════════
     -- MAIN CARD
-    -- ═══════════════════════════════
     local card = Instance.new("Frame")
     card.Size = UDim2.new(1, 0, 0, 100)
     card.BackgroundColor3 = THEME.BG_CARD
@@ -106,7 +286,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     corner(card, 10)
     stroke(card, THEME.BORDER, 1, 0)
 
-    -- Accent bar kiri
     local accentBar = Instance.new("Frame")
     accentBar.Size = UDim2.new(0, 4, 0.8, 0)
     accentBar.Position = UDim2.new(0, 0, 0.1, 0)
@@ -115,7 +294,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     accentBar.Parent = card
     corner(accentBar, 2)
 
-    -- Icon
     local iconL = Instance.new("TextLabel")
     iconL.Size = UDim2.new(0, 26, 0, 26)
     iconL.Position = UDim2.new(0, 10, 0, 8)
@@ -125,19 +303,28 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     iconL.Font = Enum.Font.Gotham
     iconL.Parent = card
 
-    -- Nama fitur
     local nameL = Instance.new("TextLabel")
     nameL.Size = UDim2.new(1, -110, 0, 16)
     nameL.Position = UDim2.new(0, 42, 0, 8)
     nameL.BackgroundTransparency = 1
-    nameL.Text = "Hitbox Size"
+    nameL.Text = "Hitbox ESP Box"
     nameL.TextColor3 = THEME.TEXT_PRIMARY
     nameL.Font = Enum.Font.GothamBold
     nameL.TextSize = 11
     nameL.TextXAlignment = Enum.TextXAlignment.Left
     nameL.Parent = card
 
-    -- Badge ON/OFF
+    local descL = Instance.new("TextLabel")
+    descL.Size = UDim2.new(1, -110, 0, 11)
+    descL.Position = UDim2.new(0, 42, 0, 26)
+    descL.BackgroundTransparency = 1
+    descL.Text = "Visual only — player tidak membesar"
+    descL.TextColor3 = THEME.TEXT_MUTED
+    descL.Font = Enum.Font.Gotham
+    descL.TextSize = 7
+    descL.TextXAlignment = Enum.TextXAlignment.Left
+    descL.Parent = card
+
     local badge = Instance.new("TextButton")
     badge.Size = UDim2.new(0, 42, 0, 20)
     badge.Position = UDim2.new(1, -50, 0, 10)
@@ -151,19 +338,18 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     badge.Parent = card
     corner(badge, 10)
 
-    -- Value label (xN)
     local valueL = Instance.new("TextLabel")
     valueL.Size = UDim2.new(0, 50, 0, 14)
     valueL.Position = UDim2.new(1, -58, 0, 34)
     valueL.BackgroundTransparency = 1
     valueL.Text = "x1"
-    valueL.TextColor3 = GREEN
+    valueL.TextColor3 = WHITE
     valueL.Font = Enum.Font.GothamBold
     valueL.TextSize = 10
     valueL.TextXAlignment = Enum.TextXAlignment.Center
     valueL.Parent = card
 
-    -- Slider track
+    -- Slider
     local track = Instance.new("Frame")
     track.Size = UDim2.new(1, -22, 0, 5)
     track.Position = UDim2.new(0, 10, 0, 56)
@@ -182,7 +368,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local knob = Instance.new("TextButton")
     knob.Size = UDim2.new(0, 16, 0, 16)
     knob.Position = UDim2.new(0, -8, 0.5, -8)
-    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    knob.BackgroundColor3 = WHITE
     knob.Text = ""
     knob.BorderSizePixel = 0
     knob.AutoButtonColor = false
@@ -190,7 +376,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     corner(knob, 8)
     stroke(knob, ORANGE, 2, 0)
 
-    -- Min / max label
     local minL = Instance.new("TextLabel")
     minL.Size = UDim2.new(0, 15, 0, 12)
     minL.Position = UDim2.new(0, 10, 0, 68)
@@ -213,9 +398,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     maxL.TextXAlignment = Enum.TextXAlignment.Right
     maxL.Parent = card
 
-    -- ═══════════════════════════════
     -- Slider logic
-    -- ═══════════════════════════════
     local function applySlider(val)
         val = math.clamp(math.floor(val + 0.5), 1, 20)
         hitboxSize = val
@@ -223,13 +406,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         fill.Size = UDim2.new(pct, 0, 1, 0)
         knob.Position = UDim2.new(pct, -8, 0.5, -8)
         valueL.Text = "x" .. val
-        if val == 1 then
-            valueL.TextColor3 = GREEN
-        elseif val <= 7 then
-            valueL.TextColor3 = ORANGE
-        else
-            valueL.TextColor3 = RED
-        end
+        valueL.TextColor3 = getBoxColor(val)
     end
 
     local sliderDrag = false
@@ -268,9 +445,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         end
     end)
 
-    -- ═══════════════════════════════
     -- Toggle ON/OFF
-    -- ═══════════════════════════════
     local function updateBadge()
         if hitboxEnabled then
             tween(card, 0.2, {BackgroundColor3 = Color3.fromRGB(40, 22, 5)}):Play()
@@ -284,7 +459,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
             tween(card, 0.2, {BackgroundColor3 = THEME.BG_CARD}):Play()
             tween(accentBar, 0.2, {BackgroundColor3 = THEME.TEXT_MUTED}):Play()
             tween(badge, 0.2, {BackgroundColor3 = Color3.fromRGB(40, 40, 55)}):Play()
-            tween(knob, 0.15, {BackgroundColor3 = Color3.fromRGB(255, 255, 255)}):Play()
+            tween(knob, 0.15, {BackgroundColor3 = WHITE}):Play()
             badge.Text = "OFF"
             badge.TextColor3 = THEME.TEXT_MUTED
             stroke(card, THEME.BORDER, 1, 0)
@@ -294,7 +469,17 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     badge.MouseButton1Click:Connect(function()
         hitboxEnabled = not hitboxEnabled
         updateBadge()
-        runLoop()
+        if hitboxEnabled then
+            -- Buat box untuk semua player yang sudah ada
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= player and p.Character then
+                    createBox(p.UserId)
+                end
+            end
+            startRender()
+        else
+            stopRender()
+        end
     end)
 
     -- ═══════════════════════════════
@@ -324,7 +509,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     presetGrid.Parent = page
 
     local gridLayout = Instance.new("UIGridLayout")
-    gridLayout.CellSize = UDim2.new(0.18, -3, 1, 0)
+    gridLayout.CellSize    = UDim2.new(0.18, -3, 1, 0)
     gridLayout.CellPadding = UDim2.new(0, 4, 0, 0)
     gridLayout.Parent = presetGrid
 
@@ -382,30 +567,12 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
                 if p ~= player then count += 1 end
             end
             statusL.Text = string.format(
-                "🎯 %s  |  Size: x%d  |  %d target",
+                "🎯 %s  |  Box: x%d  |  %d target",
                 hitboxEnabled and "ON" or "OFF",
                 hitboxSize,
                 count
             )
             statusL.TextColor3 = hitboxEnabled and ORANGE or THEME.TEXT_MUTED
-        end
-    end)
-
-    -- Cleanup saat player lain leave
-    Players.PlayerRemoving:Connect(function(p)
-        local prefix = tostring(p.UserId) .. "_"
-        for k in pairs(originalSizes) do
-            if k:sub(1, #prefix) == prefix then
-                originalSizes[k] = nil
-            end
-        end
-    end)
-
-    -- Respawn handling
-    player.CharacterAdded:Connect(function()
-        if hitboxEnabled then
-            task.wait(1)
-            runLoop()
         end
     end)
 
