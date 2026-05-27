@@ -1,6 +1,6 @@
 -- ╔══════════════════════════════════════════╗
 -- ║     TIOO BETA V1 — HITBOX TAB            ║
--- ║   ESP Box — Garis Putih, NO resize       ║
+-- ║   ESP Box — Fixed accurate bounding box  ║
 -- ╚══════════════════════════════════════════╝
 
 local function init(page, THEME, tween, corner, stroke, mainGui)
@@ -22,8 +22,8 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local hitboxEnabled     = false
     local hitboxSize        = 1
     local renderConn        = nil
-    local espBoxes          = {}   -- [UserId] = { container, top, bottom, left, right }
-    local playerConns       = {}   -- [UserId] = connection CharacterAdded
+    local espBoxes          = {}
+    local playerConns       = {}
 
     -- ═══════════════════════════════
     -- Warna berdasarkan size
@@ -82,49 +82,57 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         end
     end
 
-    -- ═══════════════════════════════
-    -- Hitung bounding box 3D → screen 2D
-    -- Menggunakan HumanoidRootPart sebagai pusat
-    -- dan estimasi ukuran karakter standar
-    -- ═══════════════════════════════
+    -- ═══════════════════════════════════════════════════════
+    -- FIXED: Hitung bounding box dari HumanoidRootPart
+    -- Karakter Roblox standar: lebar ~2 stud, tinggi ~5 stud
+    -- HumanoidRootPart ada di tengah badan (~2.5 stud dari kaki)
+    -- sizeMultiplier hanya memperbesar kotak visual, BUKAN karakter
+    -- ═══════════════════════════════════════════════════════
     local function getScreenBox(char, sizeMultiplier)
         local root = char:FindFirstChild("HumanoidRootPart")
+        local hum  = char:FindFirstChildOfClass("Humanoid")
         if not root then return nil end
 
-        -- Kumpulkan semua part
+        -- Ukuran bounding box dasar karakter
+        local baseWidth  = 2.2   -- lebar & depth stud
+        local baseHeight = 5.5   -- tinggi total stud
+
+        -- Skala: sizeMultiplier=1 → ukuran normal
+        -- sizeMultiplier lebih besar → kotak makin besar
+        local halfW = (baseWidth  * sizeMultiplier) * 0.5
+        local halfH = (baseHeight * sizeMultiplier) * 0.5
+
+        -- Root berada ~di tengah tinggi karakter
+        -- Offset atas dan bawah dari root
+        local rootCF = root.CFrame
+
+        -- 8 sudut bounding box dalam world space
+        -- Kotak tidak ikut rotasi karakter (axis-aligned di dunia)
+        -- supaya box ESP selalu tegak lurus screen
+        local rootPos = root.Position
+        local corners = {
+            rootPos + Vector3.new( halfW,  halfH,  halfW),
+            rootPos + Vector3.new(-halfW,  halfH,  halfW),
+            rootPos + Vector3.new( halfW, -halfH,  halfW),
+            rootPos + Vector3.new(-halfW, -halfH,  halfW),
+            rootPos + Vector3.new( halfW,  halfH, -halfW),
+            rootPos + Vector3.new(-halfW,  halfH, -halfW),
+            rootPos + Vector3.new( halfW, -halfH, -halfW),
+            rootPos + Vector3.new(-halfW, -halfH, -halfW),
+        }
+
         local minX, minY =  math.huge,  math.huge
         local maxX, maxY = -math.huge, -math.huge
         local anyOn = false
 
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                -- Besar kotak = ukuran asli part × multiplier, TAPI part fisik tidak diubah
-                local cf = part.CFrame
-                -- Setengah ukuran setelah dikalikan multiplier
-                local hs = (part.Size * sizeMultiplier) * 0.5
-
-                -- 8 sudut bounding box virtual
-                local corners = {
-                    cf:PointToWorldSpace(Vector3.new( hs.X,  hs.Y,  hs.Z)),
-                    cf:PointToWorldSpace(Vector3.new(-hs.X,  hs.Y,  hs.Z)),
-                    cf:PointToWorldSpace(Vector3.new( hs.X, -hs.Y,  hs.Z)),
-                    cf:PointToWorldSpace(Vector3.new(-hs.X, -hs.Y,  hs.Z)),
-                    cf:PointToWorldSpace(Vector3.new( hs.X,  hs.Y, -hs.Z)),
-                    cf:PointToWorldSpace(Vector3.new(-hs.X,  hs.Y, -hs.Z)),
-                    cf:PointToWorldSpace(Vector3.new( hs.X, -hs.Y, -hs.Z)),
-                    cf:PointToWorldSpace(Vector3.new(-hs.X, -hs.Y, -hs.Z)),
-                }
-
-                for _, wp in ipairs(corners) do
-                    local sp, onScreen = camera:WorldToViewportPoint(wp)
-                    if onScreen then
-                        anyOn = true
-                        if sp.X < minX then minX = sp.X end
-                        if sp.X > maxX then maxX = sp.X end
-                        if sp.Y < minY then minY = sp.Y end
-                        if sp.Y > maxY then maxY = sp.Y end
-                    end
-                end
+        for _, wp in ipairs(corners) do
+            local sp, onScreen = camera:WorldToViewportPoint(wp)
+            if onScreen and sp.Z > 0 then
+                anyOn = true
+                if sp.X < minX then minX = sp.X end
+                if sp.X > maxX then maxX = sp.X end
+                if sp.Y < minY then minY = sp.Y end
+                if sp.Y > maxY then maxY = sp.Y end
             end
         end
 
@@ -156,7 +164,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
                     local uid  = p.UserId
                     local char = p.Character
 
-                    -- Pastikan box ada
                     if not espBoxes[uid] then createBox(uid) end
                     local b = espBoxes[uid]
                     if not b then continue end
@@ -214,17 +221,14 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         if p == player then return end
         local uid = p.UserId
 
-        -- Buat box sekarang kalau karakter sudah ada
         if p.Character then
             createBox(uid)
         end
 
-        -- Disconnect kalau sudah ada
         if playerConns[uid] then
             playerConns[uid]:Disconnect()
         end
 
-        -- CharacterAdded untuk handle respawn
         playerConns[uid] = p.CharacterAdded:Connect(function()
             destroyBox(uid)
             task.wait(0.3)
@@ -243,7 +247,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         destroyBox(uid)
     end
 
-    -- Setup semua player yang sudah ada
     for _, p in ipairs(Players:GetPlayers()) do
         setupPlayer(p)
     end
@@ -256,7 +259,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         cleanupPlayer(p)
     end)
 
-    -- Local respawn — restart render
     player.CharacterAdded:Connect(function()
         if hitboxEnabled then
             task.wait(0.5)
@@ -470,7 +472,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         hitboxEnabled = not hitboxEnabled
         updateBadge()
         if hitboxEnabled then
-            -- Buat box untuk semua player yang sudah ada
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= player and p.Character then
                     createBox(p.UserId)
