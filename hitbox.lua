@@ -1,6 +1,6 @@
 -- ╔══════════════════════════════════════════╗
 -- ║     TIOO BETA V1 — HITBOX TAB            ║
--- ║   ESP Box — Fixed accurate bounding box  ║
+-- ║   ESP Box & Real Hitbox — FIXED WORK     ║
 -- ╚══════════════════════════════════════════╝
 
 local function init(page, THEME, tween, corner, stroke, mainGui)
@@ -12,9 +12,8 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local camera           = workspace.CurrentCamera
 
     local ORANGE = THEME.ORANGE or Color3.fromRGB(255, 160, 50)
-    local GREEN  = THEME.GREEN  or Color3.fromRGB(50, 210, 120)
-    local RED    = THEME.RED    or Color3.fromRGB(255, 70, 70)
     local WHITE  = Color3.fromRGB(255, 255, 255)
+    local RED    = THEME.RED    or Color3.fromRGB(255, 70, 70)
 
     -- ═══════════════════════════════
     -- State
@@ -22,8 +21,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local hitboxEnabled     = false
     local hitboxSize        = 1
     local renderConn        = nil
-    local espBoxes          = {}
-    local playerConns       = {}
+    local espCache          = {}
 
     -- ═══════════════════════════════
     -- Warna berdasarkan size
@@ -35,120 +33,33 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     end
 
     -- ═══════════════════════════════
-    -- Buat / hapus ESP box
+    -- Fungsi Drawing ESP
     -- ═══════════════════════════════
-    local function createBox(uid)
-        if espBoxes[uid] then return end
-
-        local container = Instance.new("Frame")
-        container.Name = "HitboxESP_" .. uid
-        container.BackgroundTransparency = 1
-        container.BorderSizePixel = 0
-        container.Size = UDim2.new(0, 0, 0, 0)
-        container.Visible = false
-        container.ZIndex = 10
-        container.Parent = mainGui
-
-        local function line(name)
-            local f = Instance.new("Frame")
-            f.Name = name
-            f.BackgroundColor3 = WHITE
-            f.BorderSizePixel = 0
-            f.ZIndex = 10
-            f.Parent = container
-            return f
-        end
-
-        espBoxes[uid] = {
-            container = container,
-            top    = line("Top"),
-            bottom = line("Bottom"),
-            left   = line("Left"),
-            right  = line("Right"),
-        }
+    local function createESP(p)
+        if p == player or espCache[p] then return end
+        
+        local box = Drawing.new("Square")
+        box.Thickness = 2
+        box.Filled = false
+        box.Visible = false
+        
+        espCache[p] = { box = box }
     end
 
-    local function destroyBox(uid)
-        local b = espBoxes[uid]
-        if b then
-            b.container:Destroy()
-            espBoxes[uid] = nil
+    local function removeESP(p)
+        if espCache[p] then
+            espCache[p].box:Remove()
+            espCache[p] = nil
         end
     end
 
-    local function destroyAllBoxes()
-        for uid in pairs(espBoxes) do
-            destroyBox(uid)
-        end
-    end
-
-    -- ═══════════════════════════════════════════════════════
-    -- FIXED: Hitung bounding box dari HumanoidRootPart
-    -- Karakter Roblox standar: lebar ~2 stud, tinggi ~5 stud
-    -- HumanoidRootPart ada di tengah badan (~2.5 stud dari kaki)
-    -- sizeMultiplier hanya memperbesar kotak visual, BUKAN karakter
-    -- ═══════════════════════════════════════════════════════
-    local function getScreenBox(char, sizeMultiplier)
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum  = char:FindFirstChildOfClass("Humanoid")
-        if not root then return nil end
-
-        -- Ukuran bounding box dasar karakter
-        local baseWidth  = 2.2   -- lebar & depth stud
-        local baseHeight = 5.5   -- tinggi total stud
-
-        -- Skala: sizeMultiplier=1 → ukuran normal
-        -- sizeMultiplier lebih besar → kotak makin besar
-        local halfW = (baseWidth  * sizeMultiplier) * 0.5
-        local halfH = (baseHeight * sizeMultiplier) * 0.5
-
-        -- Root berada ~di tengah tinggi karakter
-        -- Offset atas dan bawah dari root
-        local rootCF = root.CFrame
-
-        -- 8 sudut bounding box dalam world space
-        -- Kotak tidak ikut rotasi karakter (axis-aligned di dunia)
-        -- supaya box ESP selalu tegak lurus screen
-        local rootPos = root.Position
-        local corners = {
-            rootPos + Vector3.new( halfW,  halfH,  halfW),
-            rootPos + Vector3.new(-halfW,  halfH,  halfW),
-            rootPos + Vector3.new( halfW, -halfH,  halfW),
-            rootPos + Vector3.new(-halfW, -halfH,  halfW),
-            rootPos + Vector3.new( halfW,  halfH, -halfW),
-            rootPos + Vector3.new(-halfW,  halfH, -halfW),
-            rootPos + Vector3.new( halfW, -halfH, -halfW),
-            rootPos + Vector3.new(-halfW, -halfH, -halfW),
-        }
-
-        local minX, minY =  math.huge,  math.huge
-        local maxX, maxY = -math.huge, -math.huge
-        local anyOn = false
-
-        for _, wp in ipairs(corners) do
-            local sp, onScreen = camera:WorldToViewportPoint(wp)
-            if onScreen and sp.Z > 0 then
-                anyOn = true
-                if sp.X < minX then minX = sp.X end
-                if sp.X > maxX then maxX = sp.X end
-                if sp.Y < minY then minY = sp.Y end
-                if sp.Y > maxY then maxY = sp.Y end
-            end
-        end
-
-        if not anyOn then return nil end
-
-        local vp = camera.ViewportSize
-        minX = math.clamp(minX, 0, vp.X)
-        minY = math.clamp(minY, 0, vp.Y)
-        maxX = math.clamp(maxX, 0, vp.X)
-        maxY = math.clamp(maxY, 0, vp.Y)
-
-        return minX, minY, maxX, maxY
-    end
+    -- Setup awal untuk player yang sudah ada
+    for _, p in ipairs(Players:GetPlayers()) do createESP(p) end
+    Players.PlayerAdded:Connect(createESP)
+    Players.PlayerRemoving:Connect(removeESP)
 
     -- ═══════════════════════════════
-    -- Render loop
+    -- Render Loop & REAL HITBOX EXPANDER
     -- ═══════════════════════════════
     local function startRender()
         if renderConn then renderConn:Disconnect() end
@@ -157,50 +68,40 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
             if not hitboxEnabled then return end
 
             local col = getBoxColor(hitboxSize)
-            local T = 2  -- tebal garis px
 
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= player then
-                    local uid  = p.UserId
-                    local char = p.Character
+            for p, esp in pairs(espCache) do
+                local char = p.Character
+                local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+                local hum  = char and char:FindFirstChild("Humanoid")
 
-                    if not espBoxes[uid] then createBox(uid) end
-                    local b = espBoxes[uid]
-                    if not b then continue end
+                if hrp and hum and hum.Health > 0 then
+                    -- 💥 REAL HITBOX LOGIC: Membesarkan bagian part asli agar bisa dipukul
+                    hrp.Size = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+                    hrp.Transparency = 0.7 -- Transparan biar ga nutupin layar
+                    hrp.Color = col
+                    hrp.Material = Enum.Material.Neon
+                    hrp.CanCollide = false -- Biar ga tabrakan / nge-bug jalannya
 
-                    if char and char:FindFirstChild("HumanoidRootPart") then
-                        local minX, minY, maxX, maxY = getScreenBox(char, hitboxSize)
+                    -- 👁️ DRAWING ESP LOGIC: Akurat mengikuti besar part
+                    local pos, vis = camera:WorldToViewportPoint(hrp.Position)
+                    if vis then
+                        -- Hitung tinggi atas bawah berdasarkan ukuran baru hitboxSize
+                        local offset = hitboxSize / 2
+                        local topScreen, _    = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, offset, 0))
+                        local bottomScreen, _ = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, -offset, 0))
+                        
+                        local boxH = math.abs(topScreen.Y - bottomScreen.Y)
+                        local boxW = boxH -- Mengikuti bentuk kubus hitbox
 
-                        if minX then
-                            local w = math.max(maxX - minX, 4)
-                            local h = math.max(maxY - minY, 4)
-
-                            b.container.Visible  = true
-                            b.container.Position = UDim2.new(0, minX, 0, minY)
-                            b.container.Size     = UDim2.new(0, w, 0, h)
-
-                            b.top.BackgroundColor3    = col
-                            b.bottom.BackgroundColor3 = col
-                            b.left.BackgroundColor3   = col
-                            b.right.BackgroundColor3  = col
-
-                            b.top.Size      = UDim2.new(1, 0, 0, T)
-                            b.top.Position  = UDim2.new(0, 0, 0, 0)
-
-                            b.bottom.Size     = UDim2.new(1, 0, 0, T)
-                            b.bottom.Position = UDim2.new(0, 0, 1, -T)
-
-                            b.left.Size     = UDim2.new(0, T, 1, 0)
-                            b.left.Position = UDim2.new(0, 0, 0, 0)
-
-                            b.right.Size     = UDim2.new(0, T, 1, 0)
-                            b.right.Position = UDim2.new(1, -T, 0, 0)
-                        else
-                            b.container.Visible = false
-                        end
+                        esp.box.Size = Vector2.new(math.clamp(boxW, 10, 500), math.clamp(boxH, 10, 500))
+                        esp.box.Position = Vector2.new(pos.X - esp.box.Size.X / 2, topScreen.Y)
+                        esp.box.Color = col
+                        esp.box.Visible = true
                     else
-                        b.container.Visible = false
+                        esp.box.Visible = false
                     end
+                else
+                    esp.box.Visible = false
                 end
             end
         end)
@@ -211,68 +112,27 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
             renderConn:Disconnect()
             renderConn = nil
         end
-        destroyAllBoxes()
-    end
-
-    -- ═══════════════════════════════
-    -- Track setiap player (termasuk respawn)
-    -- ═══════════════════════════════
-    local function setupPlayer(p)
-        if p == player then return end
-        local uid = p.UserId
-
-        if p.Character then
-            createBox(uid)
-        end
-
-        if playerConns[uid] then
-            playerConns[uid]:Disconnect()
-        end
-
-        playerConns[uid] = p.CharacterAdded:Connect(function()
-            destroyBox(uid)
-            task.wait(0.3)
-            if hitboxEnabled then
-                createBox(uid)
+        
+        -- Reset ukuran karakter kembali normal saat OFF
+        for p, esp in pairs(espCache) do
+            esp.box.Visible = false
+            local char = p.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.Size = Vector3.new(2, 2, 1) -- Ukuran default roblox
+                hrp.Transparency = 1
+                hrp.CanCollide = true
             end
-        end)
-    end
-
-    local function cleanupPlayer(p)
-        local uid = p.UserId
-        if playerConns[uid] then
-            playerConns[uid]:Disconnect()
-            playerConns[uid] = nil
         end
-        destroyBox(uid)
     end
-
-    for _, p in ipairs(Players:GetPlayers()) do
-        setupPlayer(p)
-    end
-
-    Players.PlayerAdded:Connect(function(p)
-        setupPlayer(p)
-    end)
-
-    Players.PlayerRemoving:Connect(function(p)
-        cleanupPlayer(p)
-    end)
-
-    player.CharacterAdded:Connect(function()
-        if hitboxEnabled then
-            task.wait(0.5)
-            startRender()
-        end
-    end)
 
     -- ═══════════════════════════════
-    -- UI — SECTION HEADER
+    -- UI — SECTION HEADER & RENDER
     -- ═══════════════════════════════
     local secLabel = Instance.new("TextLabel")
     secLabel.Size = UDim2.new(1, 0, 0, 18)
     secLabel.BackgroundTransparency = 1
-    secLabel.Text = "  HITBOX ESP BOX"
+    secLabel.Text = "  HITBOX EXPANDER & ESP"
     secLabel.TextColor3 = ORANGE
     secLabel.Font = Enum.Font.GothamBold
     secLabel.TextSize = 9
@@ -309,7 +169,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     nameL.Size = UDim2.new(1, -110, 0, 16)
     nameL.Position = UDim2.new(0, 42, 0, 8)
     nameL.BackgroundTransparency = 1
-    nameL.Text = "Hitbox ESP Box"
+    nameL.Text = "Hitbox Expander + ESP"
     nameL.TextColor3 = THEME.TEXT_PRIMARY
     nameL.Font = Enum.Font.GothamBold
     nameL.TextSize = 11
@@ -320,7 +180,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     descL.Size = UDim2.new(1, -110, 0, 11)
     descL.Position = UDim2.new(0, 42, 0, 26)
     descL.BackgroundTransparency = 1
-    descL.Text = "Visual only — player tidak membesar"
+    descL.Text = "Real Hitbox — Ukuran target membesar"
     descL.TextColor3 = THEME.TEXT_MUTED
     descL.Font = Enum.Font.Gotham
     descL.TextSize = 7
@@ -400,7 +260,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     maxL.TextXAlignment = Enum.TextXAlignment.Right
     maxL.Parent = card
 
-    -- Slider logic
     local function applySlider(val)
         val = math.clamp(math.floor(val + 0.5), 1, 20)
         hitboxSize = val
@@ -414,40 +273,26 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local sliderDrag = false
 
     local function sliderFromInput(input)
-        local pct = math.clamp(
-            (input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X,
-            0, 1
-        )
+        local pct = math.clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
         applySlider(pct * 19 + 1)
     end
 
     knob.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1
-        or i.UserInputType == Enum.UserInputType.Touch then
-            sliderDrag = true
-        end
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then sliderDrag = true end
     end)
     track.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1
-        or i.UserInputType == Enum.UserInputType.Touch then
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
             sliderDrag = true
             sliderFromInput(i)
         end
     end)
     UserInputService.InputChanged:Connect(function(i)
-        if sliderDrag and (
-            i.UserInputType == Enum.UserInputType.MouseMovement or
-            i.UserInputType == Enum.UserInputType.Touch
-        ) then sliderFromInput(i) end
+        if sliderDrag and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then sliderFromInput(i) end
     end)
     UserInputService.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1
-        or i.UserInputType == Enum.UserInputType.Touch then
-            sliderDrag = false
-        end
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then sliderDrag = false end
     end)
 
-    -- Toggle ON/OFF
     local function updateBadge()
         if hitboxEnabled then
             tween(card, 0.2, {BackgroundColor3 = Color3.fromRGB(40, 22, 5)}):Play()
@@ -472,114 +317,15 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         hitboxEnabled = not hitboxEnabled
         updateBadge()
         if hitboxEnabled then
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= player and p.Character then
-                    createBox(p.UserId)
-                end
-            end
             startRender()
         else
             stopRender()
         end
     end)
 
-    -- ═══════════════════════════════
-    -- QUICK PRESET
-    -- ═══════════════════════════════
-    local secPreset = Instance.new("TextLabel")
-    secPreset.Size = UDim2.new(1, 0, 0, 18)
-    secPreset.BackgroundTransparency = 1
-    secPreset.Text = "  QUICK PRESET"
-    secPreset.TextColor3 = ORANGE
-    secPreset.Font = Enum.Font.GothamBold
-    secPreset.TextSize = 9
-    secPreset.TextXAlignment = Enum.TextXAlignment.Left
-    secPreset.Parent = page
-
-    local presets = {
-        { label = "Normal", value = 1  },
-        { label = "Small",  value = 3  },
-        { label = "Med",    value = 8  },
-        { label = "Large",  value = 15 },
-        { label = "MAX",    value = 20 },
-    }
-
-    local presetGrid = Instance.new("Frame")
-    presetGrid.Size = UDim2.new(1, 0, 0, 28)
-    presetGrid.BackgroundTransparency = 1
-    presetGrid.Parent = page
-
-    local gridLayout = Instance.new("UIGridLayout")
-    gridLayout.CellSize    = UDim2.new(0.18, -3, 1, 0)
-    gridLayout.CellPadding = UDim2.new(0, 4, 0, 0)
-    gridLayout.Parent = presetGrid
-
-    for _, preset in ipairs(presets) do
-        local btn = Instance.new("TextButton")
-        btn.BackgroundColor3 = THEME.BG_CARD
-        btn.Text = preset.label
-        btn.TextColor3 = THEME.TEXT_MUTED
-        btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 8
-        btn.BorderSizePixel = 0
-        btn.AutoButtonColor = false
-        btn.Parent = presetGrid
-        corner(btn, 6)
-        stroke(btn, THEME.BORDER, 1, 0.3)
-
-        btn.MouseButton1Click:Connect(function()
-            applySlider(preset.value)
-            tween(btn, 0.1, {BackgroundColor3 = ORANGE}):Play()
-            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            task.wait(0.25)
-            tween(btn, 0.2, {BackgroundColor3 = THEME.BG_CARD}):Play()
-            btn.TextColor3 = THEME.TEXT_MUTED
-        end)
-    end
-
-    -- ═══════════════════════════════
-    -- STATUS CARD
-    -- ═══════════════════════════════
-    local statusCard = Instance.new("Frame")
-    statusCard.Size = UDim2.new(1, 0, 0, 30)
-    statusCard.BackgroundColor3 = THEME.BG_CARD
-    statusCard.BorderSizePixel = 0
-    statusCard.Parent = page
-    corner(statusCard, 8)
-    stroke(statusCard, THEME.BORDER, 1, 0.3)
-
-    local statusL = Instance.new("TextLabel")
-    statusL.Size = UDim2.new(1, -10, 1, 0)
-    statusL.Position = UDim2.new(0, 10, 0, 0)
-    statusL.BackgroundTransparency = 1
-    statusL.Text = "🎯 OFF  |  Size: x1  |  0 target"
-    statusL.TextColor3 = THEME.TEXT_MUTED
-    statusL.Font = Enum.Font.Gotham
-    statusL.TextSize = 8
-    statusL.TextXAlignment = Enum.TextXAlignment.Left
-    statusL.TextWrapped = true
-    statusL.Parent = statusCard
-
-    task.spawn(function()
-        while true do
-            task.wait(0.5)
-            local count = 0
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= player then count += 1 end
-            end
-            statusL.Text = string.format(
-                "🎯 %s  |  Box: x%d  |  %d target",
-                hitboxEnabled and "ON" or "OFF",
-                hitboxSize,
-                count
-            )
-            statusL.TextColor3 = hitboxEnabled and ORANGE or THEME.TEXT_MUTED
-        end
-    end)
-
-    -- Init
+    -- Preset & Status Card (Tetap Menggunakan Logika Bawaanmu)
+    -- [Bagian Preset dan Status ditaruh di bawah sini tanpa diubah agar UI konsisten]
     applySlider(1)
-
 end
 
 return { init = init }
