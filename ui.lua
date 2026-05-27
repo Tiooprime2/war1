@@ -563,3 +563,141 @@ return {
     openUI        = openUI,
     onClose       = onClose,
 }
+-- ═══════════════════════════════════════════
+-- CODESYNC: FAST SPEED MODULE FOR WAR1 UI
+-- ═══════════════════════════════════════════
+local RunSvc = game:GetService("RunService")
+local player = game:GetService("Players").LocalPlayer
+
+local SPEED_CONFIG = {
+    SPEED = 80,
+}
+
+local speedEnabled = false
+local _speedConn = nil
+
+local function stopSpeedLoop()
+    if _speedConn then
+        _speedConn:Disconnect()
+        _speedConn = nil
+    end
+end
+
+local function startSpeedLoop()
+    stopSpeedLoop()
+    _speedConn = RunSvc.Heartbeat:Connect(function()
+        if not speedEnabled then return end
+
+        local char = player.Character
+        if not char then return end
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not root then return end
+        if hum.Health <= 0 or hum.Sit then return end
+
+        local moveDir = hum.MoveDirection
+        if moveDir.Magnitude <= 0.01 then return end
+
+        local flatDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+        if flatDir.Magnitude <= 0.01 then return end
+
+        local curVel = root.AssemblyLinearVelocity
+        local targetFlat = flatDir.Unit * SPEED_CONFIG.SPEED
+        root.AssemblyLinearVelocity = Vector3.new(targetFlat.X, curVel.Y, targetFlat.Z)
+    end)
+end
+
+-- ═══════════════════════════════
+-- UI COMPONENT (Card & Toggle)
+-- ═══════════════════════════════
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(1, 0, 0, 18)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "  MOVEMENT UTILITIES"
+speedLabel.TextColor3 = THEME.ORANGE
+speedLabel.Font = Enum.Font.GothamBold
+speedLabel.TextSize = 9
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = page -- Sesuaikan dengan variabel 'page' di ui.lua kamu
+
+local speedCard = Instance.new("Frame")
+speedCard.Size = UDim2.new(1, 0, 0, 60)
+speedCard.BackgroundColor3 = THEME.BG_CARD
+speedCard.BorderSizePixel = 0
+speedCard.Parent = page
+corner(speedCard, 10)
+stroke(speedCard, THEME.BORDER, 1, 0)
+
+local speedAccent = Instance.new("Frame")
+speedAccent.Size = UDim2.new(0, 4, 0.8, 0)
+speedAccent.Position = UDim2.new(0, 0, 0.1, 0)
+speedAccent.BackgroundColor3 = THEME.TEXT_MUTED
+speedAccent.BorderSizePixel = 0
+speedAccent.Parent = speedCard
+corner(speedAccent, 2)
+
+local speedIcon = Instance.new("TextLabel")
+speedIcon.Size = UDim2.new(0, 26, 0, 26)
+speedIcon.Position = UDim2.new(0, 10, 0, 17)
+speedIcon.BackgroundTransparency = 1
+speedIcon.Text = "⚡"
+speedIcon.TextSize = 18
+speedIcon.Font = Enum.Font.Gotham
+speedIcon.Parent = speedCard
+
+local speedName = Instance.new("TextLabel")
+speedName.Size = UDim2.new(1, -110, 0, 16)
+speedName.Position = UDim2.new(0, 42, 0, 14)
+speedName.BackgroundTransparency = 1
+speedName.Text = "Fast Speed (80)"
+speedName.TextColor3 = THEME.TEXT_PRIMARY
+speedName.Font = Enum.Font.GothamBold
+speedName.TextSize = 11
+speedName.TextXAlignment = Enum.TextXAlignment.Left
+speedName.Parent = speedCard
+
+local speedDesc = Instance.new("TextLabel")
+speedDesc.Size = UDim2.new(1, -110, 0, 11)
+speedDesc.Position = UDim2.new(0, 42, 0, 32)
+speedDesc.BackgroundTransparency = 1
+speedDesc.Text = "Stabilizer linear velocity bypass"
+speedDesc.TextColor3 = THEME.TEXT_MUTED
+speedDesc.Font = Enum.Font.Gotham
+speedDesc.TextSize = 7
+speedDesc.TextXAlignment = Enum.TextXAlignment.Left
+speedDesc.Parent = speedCard
+
+local speedBadge = Instance.new("TextButton")
+speedBadge.Size = UDim2.new(0, 42, 0, 20)
+speedBadge.Position = UDim2.new(1, -50, 0, 20)
+speedBadge.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+speedBadge.Text = "OFF"
+speedBadge.TextColor3 = THEME.TEXT_MUTED
+speedBadge.Font = Enum.Font.GothamBold
+speedBadge.TextSize = 9
+speedBadge.BorderSizePixel = 0
+speedBadge.AutoButtonColor = false
+speedBadge.Parent = speedCard
+corner(speedBadge, 10)
+
+speedBadge.MouseButton1Click:Connect(function()
+    speedEnabled = not speedEnabled
+    if speedEnabled then
+        tween(speedCard, 0.2, {BackgroundColor3 = Color3.fromRGB(5, 35, 20)}):Play()
+        tween(speedAccent, 0.2, {BackgroundColor3 = THEME.GREEN or Color3.fromRGB(50, 210, 120)}):Play()
+        tween(speedBadge, 0.2, {BackgroundColor3 = THEME.GREEN or Color3.fromRGB(50, 210, 120)}):Play()
+        speedBadge.Text = "ON"
+        speedBadge.TextColor3 = Color3.fromRGB(255, 255, 255)
+        startSpeedLoop()
+    else
+        tween(speedCard, 0.2, {BackgroundColor3 = THEME.BG_CARD}):Play()
+        tween(speedAccent, 0.2, {BackgroundColor3 = THEME.TEXT_MUTED}):Play()
+        tween(speedBadge, 0.2, {BackgroundColor3 = Color3.fromRGB(40, 40, 55)}):Play()
+        speedBadge.Text = "OFF"
+        speedBadge.TextColor3 = THEME.TEXT_MUTED
+        stopSpeedLoop()
+    end
+end)
+
+player.CharacterRemoving:Connect(stopSpeedLoop)
