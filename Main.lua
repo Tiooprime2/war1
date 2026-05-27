@@ -28,7 +28,20 @@ if not ok3 then
     return
 end
 
+-- Tambahkan di bawah loader Fastspeed yang sudah ada
+
+local ok4, MeleHitbox = pcall(function()
+    return loadstring(game:HttpGet(BASE_URL .. "mele_hitbox.lua"))()
+end)
+if not ok4 then
+    warn("❌ Gagal load mele_hitbox.lua:", MeleHitbox)
+    return
+end
+
 task.wait(0.1)
+
+)
 
 Hitbox.init(UI.hitboxPage, UI.THEME, UI.tween, UI.corner, UI.stroke, UI.mainGui)
 FastSpeed.build(UI.mainPage, UI)
+MeleHitbox.init(UI.hitboxPage, UI.THEME, UI.tween, UI.corner, UI.stroke, UI.mainGui)
