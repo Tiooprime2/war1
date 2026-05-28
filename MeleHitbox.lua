@@ -1,6 +1,6 @@
 -- ╔══════════════════════════════════════════╗
--- ║  TIOO BETA V1 — MELE HITBOX (FIXED)     ║
--- ║  Anti-lag: Heartbeat + throttle          ║
+-- ║  TIOO BETA V1 — MELE HITBOX + ESP        ║
+-- ║  Fake Part melee + Drawing ESP box       ║
 -- ║  Respawn-safe: CharacterAdded listener   ║
 -- ╚══════════════════════════════════════════╝
 
@@ -11,6 +11,8 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local UserInputService = game:GetService("UserInputService")
 
     local player = Players.LocalPlayer
+    local camera = workspace.CurrentCamera
+
     local ORANGE = THEME.ORANGE or Color3.fromRGB(255, 160, 50)
     local WHITE  = Color3.fromRGB(255, 255, 255)
     local RED    = THEME.RED    or Color3.fromRGB(255, 70, 70)
@@ -21,6 +23,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local meleEnabled  = false
     local meleSize     = 6
     local fakeBoxCache = {}   -- { [player] = fakePart }
+    local espCache     = {}   -- { [player] = { box = Drawing } }
     local renderConn   = nil
 
     -- ═══════════════════════════════
@@ -32,16 +35,33 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         else return RED end
     end
 
+    -- ═══════════════════════════════
+    -- ESP DRAWING
+    -- ═══════════════════════════════
+    local function createESP(p)
+        if p == player then return end
+        if espCache[p] then return end
+
+        local box = Drawing.new("Square")
+        box.Thickness = 2
+        box.Filled    = false
+        box.Visible   = false
+
+        espCache[p] = { box = box }
+    end
+
+    local function removeESP(p)
+        if espCache[p] then
+            espCache[p].box:Remove()
+            espCache[p] = nil
+        end
+    end
+
     -- ═══════════════════════════════════════════════════════════════
     -- FAKE HITBOX PART
-    -- Cara kerja:
-    -- Spawn satu Part transparan besar per musuh, di-snap ke HRP
-    -- mereka setiap Heartbeat. GetPartsInPart dari melee attack
-    -- karakter kita akan overlap part ini, sehingga hit terdaftar.
     -- ═══════════════════════════════════════════════════════════════
     local function spawnFakeBox(p)
         if p == player then return end
-        -- Hapus yang lama kalau ada (misal setelah respawn)
         if fakeBoxCache[p] and fakeBoxCache[p].Parent then
             fakeBoxCache[p]:Destroy()
         end
@@ -60,8 +80,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         part.Anchored     = true
         part.CanCollide   = false
         part.CastShadow   = false
-        -- FIX: Parent ke karakter musuh, bukan workspace global.
-        -- Ini agar part otomatis hancur saat karakter di-destroy (respawn).
         part.Parent       = char
 
         fakeBoxCache[p] = part
@@ -91,15 +109,9 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     end
 
     -- ═══════════════════════════════════════════════════════════════
-    -- FIX LAG: Pakai Heartbeat bukan RenderStepped.
-    -- RenderStepped blok render thread → lag visual.
-    -- Heartbeat jalan di physics thread → jauh lebih ringan.
-    --
-    -- FIX SMOOTH: Throttle update — hanya update kalau part sudah
-    -- beda posisi signifikan dari HRP (>0.1 stud). Ini kurangi
-    -- jumlah CFrame write per detik drastis tanpa kehilangan akurasi.
+    -- RENDER LOOP — Heartbeat (ringan) + ESP Drawing
     -- ═══════════════════════════════════════════════════════════════
-    local MOVE_THRESHOLD = 0.1  -- stud, di bawah ini skip update
+    local MOVE_THRESHOLD = 0.1
 
     local function startRender()
         if renderConn then renderConn:Disconnect() end
@@ -107,14 +119,15 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         renderConn = RunService.Heartbeat:Connect(function()
             if not meleEnabled then return end
 
+            local col = getColor(meleSize)
+
             for p, fakePart in pairs(fakeBoxCache) do
-                -- Guard: part mungkin sudah hancur saat respawn
+                -- Guard: part hancur saat respawn
                 if not fakePart or not fakePart.Parent then
-                    -- Coba spawn ulang kalau karakter sudah ada lagi
                     if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
                         spawnFakeBox(p)
                     end
-                    continue  -- skip frame ini
+                    continue
                 end
 
                 local char = p.Character
@@ -122,14 +135,36 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
                 local hum  = char and char:FindFirstChild("Humanoid")
 
                 if hrp and hum and hum.Health > 0 then
-                    -- Throttle: hanya write CFrame kalau posisi berubah cukup
+                    -- Update fake part position (throttled)
                     local diff = (fakePart.Position - hrp.Position).Magnitude
                     if diff > MOVE_THRESHOLD then
-                        fakePart.CFrame  = hrp.CFrame
+                        fakePart.CFrame = hrp.CFrame
                     end
                     fakePart.Visible = true
+
+                    -- ESP Drawing
+                    local esp = espCache[p]
+                    if esp then
+                        local pos, vis = camera:WorldToViewportPoint(hrp.Position)
+                        if vis then
+                            local offset       = meleSize / 2
+                            local topScreen    = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0,  offset, 0))
+                            local bottomScreen = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, -offset, 0))
+
+                            local boxH = math.abs(topScreen.Y - bottomScreen.Y)
+                            local boxW = boxH
+
+                            esp.box.Size     = Vector2.new(math.clamp(boxW, 10, 500), math.clamp(boxH, 10, 500))
+                            esp.box.Position = Vector2.new(pos.X - esp.box.Size.X / 2, topScreen.Y)
+                            esp.box.Color    = col
+                            esp.box.Visible  = true
+                        else
+                            esp.box.Visible = false
+                        end
+                    end
                 else
                     fakePart.Visible = false
+                    if espCache[p] then espCache[p].box.Visible = false end
                 end
             end
         end)
@@ -140,33 +175,30 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
             renderConn:Disconnect()
             renderConn = nil
         end
+        -- Sembunyikan semua ESP
+        for _, esp in pairs(espCache) do
+            esp.box.Visible = false
+        end
         removeAllBoxes()
     end
 
     -- ═══════════════════════════════════════════════════════════════
-    -- FIX RESPAWN: Tiap kali karakter muncul, spawn ulang fake box
+    -- PLAYER SETUP — Respawn-safe
     -- ═══════════════════════════════════════════════════════════════
-    local charConnections = {}  -- { [player] = RBXScriptConnection }
+    local charConnections = {}
 
     local function setupPlayer(p)
         if p == player then return end
 
-        -- Listener CharacterAdded untuk respawn
-        if charConnections[p] then
-            charConnections[p]:Disconnect()
-        end
+        createESP(p)
+
+        if charConnections[p] then charConnections[p]:Disconnect() end
         charConnections[p] = p.CharacterAdded:Connect(function()
-            -- Tunggu HRP tersedia
             task.wait(0.1)
-            if meleEnabled then
-                spawnFakeBox(p)
-            end
+            if meleEnabled then spawnFakeBox(p) end
         end)
 
-        -- Kalau karakter sudah ada sekarang
-        if meleEnabled and p.Character then
-            spawnFakeBox(p)
-        end
+        if meleEnabled and p.Character then spawnFakeBox(p) end
     end
 
     local function cleanupPlayer(p)
@@ -175,6 +207,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
             charConnections[p] = nil
         end
         removeFakeBox(p)
+        removeESP(p)
     end
 
     for _, p in ipairs(Players:GetPlayers()) do setupPlayer(p) end
@@ -223,7 +256,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     nameL.Size               = UDim2.new(1, -110, 0, 16)
     nameL.Position           = UDim2.new(0, 42, 0, 8)
     nameL.BackgroundTransparency = 1
-    nameL.Text               = "MeleHitbox"
+    nameL.Text               = "MeleHitbox + ESP"
     nameL.TextColor3         = THEME.TEXT_PRIMARY
     nameL.Font               = Enum.Font.GothamBold
     nameL.TextSize           = 11
@@ -234,7 +267,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     descL.Size               = UDim2.new(1, -110, 0, 11)
     descL.Position           = UDim2.new(0, 42, 0, 26)
     descL.BackgroundTransparency = 1
-    descL.Text               = "Fake Part — Deteksi melee jarak dekat"
+    descL.Text               = "Fake Part + ESP Box — Melee jarak dekat"
     descL.TextColor3         = THEME.TEXT_MUTED
     descL.Font               = Enum.Font.Gotham
     descL.TextSize           = 7
@@ -322,9 +355,9 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         val = math.clamp(math.floor(val + 0.5), 1, 20)
         meleSize = val
         local pct = (val - 1) / 19
-        fill.Size      = UDim2.new(pct, 0, 1, 0)
-        knob.Position  = UDim2.new(pct, -8, 0.5, -8)
-        valueL.Text      = "x" .. val
+        fill.Size         = UDim2.new(pct, 0, 1, 0)
+        knob.Position     = UDim2.new(pct, -8, 0.5, -8)
+        valueL.Text       = "x" .. val
         valueL.TextColor3 = getColor(val)
         if meleEnabled then updateAllSizes() end
     end
@@ -392,7 +425,6 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         meleEnabled = not meleEnabled
         updateBadge()
         if meleEnabled then
-            -- Spawn fake box untuk semua player
             for _, p in ipairs(Players:GetPlayers()) do
                 if p ~= player and p.Character then
                     spawnFakeBox(p)
