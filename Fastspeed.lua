@@ -213,6 +213,12 @@ function FastSpeed.build(page, UI)
 
     player.CharacterRemoving:Connect(stopSpeedLoop)
 
+player.CharacterAdded:Connect(function()
+    if isEnabled then
+        task.wait(0.5) -- tunggu karakter fully loaded
+        startSpeedLoop()
+    end
+end)
     applySlider(CONFIG.DEFAULT)
 end
 
