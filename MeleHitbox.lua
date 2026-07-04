@@ -1,6 +1,6 @@
 -- ╔══════════════════════════════════════════╗
--- ║     TIOO BETA V1 — HITBOX TAB  (FIXED)   ║
--- ║   ESP Box & Real Hitbox (Multi-Part)     ║
+-- ║     TIOO BETA V1 — MELE HITBOX (FIXED)  ║
+-- ║   ESP Box & Invisible Hitbox Expander    ║
 -- ╚══════════════════════════════════════════╝
 
 local function init(page, THEME, tween, corner, stroke, mainGui)
@@ -21,12 +21,54 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local hitboxEnabled = false
     local hitboxSize    = 1
     local renderConn    = nil
-    local espCache      = {}  
+    local espCache      = {}
+
+    -- ═══════════════════════════════════════════════════════════════
+    -- FIX UTAMA:
+    -- Daripada mengubah size part ASLI (yang bikin goyang karena
+    -- Motor6D / joint ikut terdistorsi), kita pakai INVISIBLE PART
+    -- terpisah yang di-weld ke HRP. Part ini tidak mempengaruhi
+    -- animasi/physics karakter sama sekali.
+    -- ═══════════════════════════════════════════════════════════════
 
     local function getBoxColor(val)
         if val <= 1 then return WHITE
         elseif val <= 7 then return ORANGE
         else return RED end
+    end
+
+    -- Buat/update invisible hitbox part yang di-weld ke HRP
+    local function applyInvisibleHitbox(char, size)
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        -- Cari atau buat hitbox part
+        local hb = hrp:FindFirstChild("_MeleHitboxPart")
+        if not hb then
+            hb          = Instance.new("Part")
+            hb.Name     = "_MeleHitboxPart"
+            hb.Anchored = false
+            hb.CanCollide = false
+            hb.Massless = true
+            hb.Transparency = 1   -- Invisible, tidak merusak tampilan
+            hb.CastShadow   = false
+            hb.Parent       = hrp
+
+            local weld          = Instance.new("WeldConstraint")
+            weld.Part0          = hrp
+            weld.Part1          = hb
+            weld.Parent         = hb
+        end
+
+        -- Update size setiap frame (aman karena ini part terpisah)
+        hb.Size = Vector3.new(size, size, size)
+    end
+
+    local function removeInvisibleHitbox(char)
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local hb = hrp:FindFirstChild("_MeleHitboxPart")
+        if hb then hb:Destroy() end
     end
 
     -- ═══════════════════════════════
@@ -41,10 +83,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         box.Filled    = false
         box.Visible   = false
 
-        espCache[p] = { 
-            box = box,
-            partsData = {} -- Cache untuk simpan size/transparency asli
-        }
+        espCache[p] = { box = box }
     end
 
     local function removeESP(p)
@@ -54,24 +93,48 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         end
     end
 
-    local function setupPlayerListeners(p)
+    local function setupPlayer(p)
         createESP(p)
+        -- Pantau respawn agar hitbox di-inject ulang ke karakter baru
+        p.CharacterAdded:Connect(function(char)
+            if hitboxEnabled then
+                -- Tunggu HRP muncul dulu
+                local hrp = char:WaitForChild("HumanoidRootPart", 5)
+                if hrp then
+                    applyInvisibleHitbox(char, hitboxSize)
+                end
+            end
+        end)
     end
 
     for _, p in ipairs(Players:GetPlayers()) do
-        setupPlayerListeners(p)
+        if p ~= player then
+            setupPlayer(p)
+        end
     end
-    Players.PlayerAdded:Connect(setupPlayerListeners)
-    Players.PlayerRemoving:Connect(removeESP)
+    Players.PlayerAdded:Connect(function(p)
+        if p ~= player then setupPlayer(p) end
+    end)
+    Players.PlayerRemoving:Connect(function(p)
+        -- Bersihkan hitbox part jika masih ada
+        if p.Character then
+            removeInvisibleHitbox(p.Character)
+        end
+        removeESP(p)
+    end)
 
     -- ═══════════════════════════════
     -- Render Loop
     -- ═══════════════════════════════
-    -- Daftar part yang akan di-expand agar melee kena
-    local partsToExpand = {"HumanoidRootPart", "Head", "Torso", "UpperTorso", "LowerTorso"}
-
     local function startRender()
         if renderConn then renderConn:Disconnect() end
+
+        -- Inject hitbox ke semua karakter yang sudah ada saat ON
+        for p, _ in pairs(espCache) do
+            if p.Character then
+                applyInvisibleHitbox(p.Character, hitboxSize)
+            end
+        end
 
         renderConn = RunService.RenderStepped:Connect(function()
             if not hitboxEnabled then return end
@@ -80,40 +143,19 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
 
             for p, esp in pairs(espCache) do
                 local char = p.Character
-                local hum  = char and char:FindFirstChild("Humanoid")
+                local hum  = char and char:FindFirstChildOfClass("Humanoid")
                 local hrp  = char and char:FindFirstChild("HumanoidRootPart")
 
                 if char and hum and hum.Health > 0 and hrp then
-                    
-                    -- Expand hitbox untuk part-part vital
-                    for _, partName in ipairs(partsToExpand) do
-                        local part = char:FindFirstChild(partName)
-                        if part and part:IsA("BasePart") then
-                            
-                            -- Simpan data asli jika belum tercatat di cache
-                            if not esp.partsData[partName] then
-                                esp.partsData[partName] = {
-                                    Size = part.Size,
-                                    Transparency = part.Transparency,
-                                    CanCollide = part.CanCollide,
-                                    Massless = part.Massless
-                                }
-                            end
 
-                            -- Apply Real Hitbox
-                            part.Size         = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
-                            part.Transparency = 0.7
-                            part.Color        = col
-                            part.Material     = Enum.Material.Neon
-                            part.CanCollide   = false
-                            part.Massless     = true -- Cegah musuh terbang/physics glitch
-                        end
-                    end
+                    -- Update ukuran invisible hitbox tiap frame
+                    -- (tidak menyentuh part asli = tidak goyang)
+                    applyInvisibleHitbox(char, hitboxSize)
 
-                    -- Drawing ESP (Pakai patokan HRP agar kotaknya stabil)
+                    -- Drawing ESP pakai posisi HRP (stabil)
                     local pos, vis = camera:WorldToViewportPoint(hrp.Position)
                     if vis then
-                        local offset = hitboxSize / 2
+                        local offset       = hitboxSize / 2
                         local topScreen    = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0,  offset, 0))
                         local bottomScreen = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, -offset, 0))
 
@@ -140,23 +182,12 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
             renderConn = nil
         end
 
-        -- Kembalikan semua part ke ukuran/settingan asli saat OFF
+        -- Hapus invisible hitbox dari semua karakter saat OFF
         for p, esp in pairs(espCache) do
             esp.box.Visible = false
-            local char = p.Character
-            if char then
-                for partName, origData in pairs(esp.partsData) do
-                    local part = char:FindFirstChild(partName)
-                    if part then
-                        part.Size         = origData.Size
-                        part.Transparency = origData.Transparency
-                        part.CanCollide   = origData.CanCollide
-                        part.Massless     = origData.Massless
-                    end
-                end
+            if p.Character then
+                removeInvisibleHitbox(p.Character)
             end
-            -- Bersihkan cache part agar terekam ulang (misal kalau mereka mati/respawn)
-            esp.partsData = {}
         end
     end
 
@@ -166,7 +197,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local secLabel = Instance.new("TextLabel")
     secLabel.Size               = UDim2.new(1, 0, 0, 18)
     secLabel.BackgroundTransparency = 1
-    secLabel.Text               = "  HITBOX EXPANDER & ESP"
+    secLabel.Text               = "  MELEE HITBOX & ESP"
     secLabel.TextColor3         = ORANGE
     secLabel.Font               = Enum.Font.GothamBold
     secLabel.TextSize           = 9
@@ -193,7 +224,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     iconL.Size               = UDim2.new(0, 26, 0, 26)
     iconL.Position           = UDim2.new(0, 10, 0, 8)
     iconL.BackgroundTransparency = 1
-    iconL.Text               = "🎯"
+    iconL.Text               = "⚔️"
     iconL.TextSize           = 18
     iconL.Font               = Enum.Font.Gotham
     iconL.Parent             = card
@@ -202,7 +233,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     nameL.Size               = UDim2.new(1, -110, 0, 16)
     nameL.Position           = UDim2.new(0, 42, 0, 8)
     nameL.BackgroundTransparency = 1
-    nameL.Text               = "Hitbox Expander + ESP"
+    nameL.Text               = "Melee Hitbox + ESP"
     nameL.TextColor3         = THEME.TEXT_PRIMARY
     nameL.Font               = Enum.Font.GothamBold
     nameL.TextSize           = 11
@@ -213,7 +244,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     descL.Size               = UDim2.new(1, -110, 0, 11)
     descL.Position           = UDim2.new(0, 42, 0, 26)
     descL.BackgroundTransparency = 1
-    descL.Text               = "Real Hitbox — Ukuran target membesar"
+    descL.Text               = "Invisible hitbox — karakter tidak goyang"
     descL.TextColor3         = THEME.TEXT_MUTED
     descL.Font               = Enum.Font.Gotham
     descL.TextSize           = 7
@@ -296,10 +327,19 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         val = math.clamp(math.floor(val + 0.5), 1, 20)
         hitboxSize = val
         local pct = (val - 1) / 19
-        fill.Size     = UDim2.new(pct, 0, 1, 0)
-        knob.Position = UDim2.new(pct, -8, 0.5, -8)
-        valueL.Text      = "x" .. val
+        fill.Size         = UDim2.new(pct, 0, 1, 0)
+        knob.Position     = UDim2.new(pct, -8, 0.5, -8)
+        valueL.Text       = "x" .. val
         valueL.TextColor3 = getBoxColor(val)
+
+        -- Langsung update ukuran hitbox kalau sedang ON
+        if hitboxEnabled then
+            for p, _ in pairs(espCache) do
+                if p.Character then
+                    applyInvisibleHitbox(p.Character, val)
+                end
+            end
+        end
     end
 
     local sliderDrag = false
