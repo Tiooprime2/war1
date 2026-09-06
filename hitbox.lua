@@ -1,6 +1,6 @@
 -- ╔══════════════════════════════════════════╗
--- ║     TIOO BETA V1 — HITBOX TAB  (FIXED)  ║
--- ║   ESP Box & Real Hitbox                  ║
+-- ║     TIOO BETA V1 — HITBOX TAB            ║
+-- ║   ESP Box & Invisible Hitbox (All Games) ║
 -- ╚══════════════════════════════════════════╝
 
 local function init(page, THEME, tween, corner, stroke, mainGui)
@@ -32,6 +32,47 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         else return RED end
     end
 
+    -- ═══════════════════════════════════════════════════════════════════════
+    -- INVISIBLE HITBOX PART
+    -- Metode ini AMAN untuk semua game:
+    --   • Tidak mengubah ukuran HRP asli → tidak merusak animasi / joint
+    --   • WeldConstraint mengikuti HRP secara fisik tanpa script tambahan
+    --   • CanCollide = false → tidak menggeser karakter lain secara visual
+    --   • Massless = true   → tidak menambah berat ke ragdoll / physics
+    -- ═══════════════════════════════════════════════════════════════════════
+    local HITBOX_TAG = "_TiooHitboxPart"
+
+    local function applyInvisibleHitbox(char, size)
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+
+        local hb = hrp:FindFirstChild(HITBOX_TAG)
+        if not hb then
+            hb              = Instance.new("Part")
+            hb.Name         = HITBOX_TAG
+            hb.Anchored     = false
+            hb.CanCollide   = false
+            hb.Massless     = true
+            hb.Transparency = 1
+            hb.CastShadow   = false
+            hb.Parent       = hrp   -- parent ke HRP dulu sebelum weld
+
+            local weld       = Instance.new("WeldConstraint")
+            weld.Part0       = hrp
+            weld.Part1       = hb
+            weld.Parent      = hb
+        end
+
+        hb.Size = Vector3.new(size, size, size)
+    end
+
+    local function removeInvisibleHitbox(char)
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local hb = hrp:FindFirstChild(HITBOX_TAG)
+        if hb then hb:Destroy() end
+    end
+
     -- ═══════════════════════════════
     -- ESP Drawing helpers
     -- ═══════════════════════════════
@@ -39,12 +80,11 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         if p == player then return end
         if espCache[p] then return end
 
-        local box = Drawing.new("Square")
-        box.Thickness = 2
-        box.Filled    = false
-        box.Visible   = false
-
-        espCache[p] = { box = box }
+        local box         = Drawing.new("Square")
+        box.Thickness     = 2
+        box.Filled        = false
+        box.Visible       = false
+        espCache[p]       = { box = box }
     end
 
     local function removeESP(p)
@@ -54,33 +94,45 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
         end
     end
 
-    -- ═══════════════════════════════════════════════════════════
-    -- FIX #1 — Pantau RESPAWN tiap player
-    -- Saat karakter respawn, ukuran HRP kembali default (2,2,1).
-    -- Kita tidak perlu reset manual karena render loop langsung
-    -- akan meng-overwrite ukurannya di frame berikutnya kalau ON.
-    -- Yang penting ESP drawing tidak hilang — dan ESP kita simpan
-    -- di espCache[player], bukan di karakter, jadi tidak hilang.
-    -- ═══════════════════════════════════════════════════════════
-    local function setupPlayerListeners(p)
+    -- ═══════════════════════════════════════════════════════════════
+    -- Player setup
+    -- Pantau CharacterAdded agar hitbox di-inject ulang saat respawn
+    -- ═══════════════════════════════════════════════════════════════
+    local function setupPlayer(p)
+        if p == player then return end
         createESP(p)
-        -- Kalau karakternya respawn, ESP sudah aman (di espCache).
-        -- Kita hanya perlu pastikan ukuran HRP di-apply ulang.
-        -- Render loop sudah menangani ini otomatis setiap frame.
+
+        p.CharacterAdded:Connect(function(char)
+            if hitboxEnabled then
+                local hrp = char:WaitForChild("HumanoidRootPart", 8)
+                if hrp then
+                    applyInvisibleHitbox(char, hitboxSize)
+                end
+            end
+        end)
     end
 
-    -- Setup untuk semua player yang sudah ada
     for _, p in ipairs(Players:GetPlayers()) do
-        setupPlayerListeners(p)
+        setupPlayer(p)
     end
-    Players.PlayerAdded:Connect(setupPlayerListeners)
-    Players.PlayerRemoving:Connect(removeESP)
+    Players.PlayerAdded:Connect(setupPlayer)
+    Players.PlayerRemoving:Connect(function(p)
+        if p.Character then removeInvisibleHitbox(p.Character) end
+        removeESP(p)
+    end)
 
     -- ═══════════════════════════════
     -- Render Loop
     -- ═══════════════════════════════
     local function startRender()
         if renderConn then renderConn:Disconnect() end
+
+        -- Inject ke semua karakter yang sudah ada
+        for p, _ in pairs(espCache) do
+            if p.Character then
+                applyInvisibleHitbox(p.Character, hitboxSize)
+            end
+        end
 
         renderConn = RunService.RenderStepped:Connect(function()
             if not hitboxEnabled then return end
@@ -89,22 +141,17 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
 
             for p, esp in pairs(espCache) do
                 local char = p.Character
-                -- FIX #2 — Ambil ulang HRP setiap frame (handle respawn)
                 local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-                local hum  = char and char:FindFirstChild("Humanoid")
+                local hum  = char and char:FindFirstChildOfClass("Humanoid")
 
                 if hrp and hum and hum.Health > 0 then
-                    -- Real hitbox expand
-                    hrp.Size        = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
-                    hrp.Transparency = 0.7
-                    hrp.Color        = col
-                    hrp.Material     = Enum.Material.Neon
-                    hrp.CanCollide   = false
+                    -- Pastikan invisible hitbox selalu ada (handle respawn / cleaning)
+                    applyInvisibleHitbox(char, hitboxSize)
 
-                    -- Drawing ESP
+                    -- Drawing ESP menggunakan posisi HRP (stabil, tidak bergantung hitbox part)
                     local pos, vis = camera:WorldToViewportPoint(hrp.Position)
                     if vis then
-                        local offset = hitboxSize / 2
+                        local offset       = hitboxSize / 2
                         local topScreen    = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0,  offset, 0))
                         local bottomScreen = camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, -offset, 0))
 
@@ -131,15 +178,11 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
             renderConn = nil
         end
 
-        -- Reset semua HRP ke ukuran default saat OFF
+        -- Hapus invisible hitbox dari semua karakter & sembunyikan ESP
         for p, esp in pairs(espCache) do
             esp.box.Visible = false
-            local char = p.Character
-            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                hrp.Size         = Vector3.new(2, 2, 1)
-                hrp.Transparency = 1
-                hrp.CanCollide   = true
+            if p.Character then
+                removeInvisibleHitbox(p.Character)
             end
         end
     end
@@ -197,7 +240,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     descL.Size               = UDim2.new(1, -110, 0, 11)
     descL.Position           = UDim2.new(0, 42, 0, 26)
     descL.BackgroundTransparency = 1
-    descL.Text               = "Real Hitbox — Ukuran target membesar"
+    descL.Text               = "Invisible hitbox — works on all games"
     descL.TextColor3         = THEME.TEXT_MUTED
     descL.Font               = Enum.Font.Gotham
     descL.TextSize           = 7
@@ -279,11 +322,24 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local function applySlider(val)
         val = math.clamp(math.floor(val + 0.5), 1, 20)
         hitboxSize = val
+        local col = getBoxColor(val)
         local pct = (val - 1) / 19
-        fill.Size     = UDim2.new(pct, 0, 1, 0)
-        knob.Position = UDim2.new(pct, -8, 0.5, -8)
-        valueL.Text      = "x" .. val
-        valueL.TextColor3 = getBoxColor(val)
+        fill.Size          = UDim2.new(pct, 0, 1, 0)
+        fill.BackgroundColor3 = col
+        knob.Position      = UDim2.new(pct, -8, 0.5, -8)
+        valueL.Text        = "x" .. val
+        valueL.TextColor3  = col
+        local ks = knob:FindFirstChildOfClass("UIStroke")
+        if ks then ks.Color = col end
+
+        -- Update ukuran hitbox live kalau sedang ON
+        if hitboxEnabled then
+            for p, _ in pairs(espCache) do
+                if p.Character then
+                    applyInvisibleHitbox(p.Character, val)
+                end
+            end
+        end
     end
 
     local sliderDrag = false
