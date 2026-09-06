@@ -11,14 +11,14 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
 local CONFIG = {
-    MIN_SPEED = 80,
-    MAX_SPEED = 110,
-    DEFAULT   = 80,
+    MIN_SPEED = 100,
+    MAX_SPEED = 450,
+    DEFAULT   = 100,
 }
 
-local isEnabled = false
+local isEnabled    = false
 local currentSpeed = CONFIG.DEFAULT
-local _speedConn = nil
+local _speedConn   = nil
 
 local function stopSpeedLoop()
     if _speedConn then _speedConn:Disconnect(); _speedConn = nil end
@@ -48,18 +48,26 @@ end
 local FastSpeed = {}
 
 function FastSpeed.build(page, UI)
-    local THEME = UI.THEME
-    local tween = UI.tween
+    local THEME  = UI.THEME
+    local tween  = UI.tween
     local corner = UI.corner
     local stroke = UI.stroke
 
-    local ORANGE = THEME.ORANGE or Color3.fromRGB(255, 160, 50)
     local WHITE  = Color3.fromRGB(255, 255, 255)
     local GREEN  = THEME.GREEN  or Color3.fromRGB(50, 210, 120)
+    local ORANGE = THEME.ORANGE or Color3.fromRGB(255, 160, 50)
+    local RED    = THEME.RED    or Color3.fromRGB(255, 90, 90)
+
+    -- Warna knob/fill berubah sesuai kecepatan
+    local function getSpeedColor(val)
+        if val <= 150 then return GREEN
+        elseif val <= 280 then return ORANGE
+        else return RED end
+    end
 
     UI.createSection(page, "Movement")
 
-    -- CARD
+    -- ── CARD ──────────────────────────────────────────
     local card = Instance.new("Frame")
     card.Size             = UDim2.new(1, 0, 0, 100)
     card.BackgroundColor3 = THEME.BG_CARD
@@ -91,7 +99,7 @@ function FastSpeed.build(page, UI)
     descL.TextColor3 = THEME.TEXT_MUTED; descL.Font = Enum.Font.Gotham
     descL.TextSize = 7; descL.TextXAlignment = Enum.TextXAlignment.Left; descL.Parent = card
 
-    -- BADGE (ON/OFF)
+    -- ── BADGE ON/OFF ──────────────────────────────────
     local badge = Instance.new("TextButton")
     badge.Size = UDim2.new(0, 42, 0, 20); badge.Position = UDim2.new(1, -50, 0, 10)
     badge.BackgroundColor3 = Color3.fromRGB(40, 40, 55); badge.Text = "OFF"
@@ -99,14 +107,14 @@ function FastSpeed.build(page, UI)
     badge.TextSize = 9; badge.BorderSizePixel = 0; badge.AutoButtonColor = false
     badge.Parent = card; corner(badge, 10)
 
-    -- SPEED VALUE LABEL
+    -- ── SPEED VALUE LABEL ─────────────────────────────
     local valueL = Instance.new("TextLabel")
     valueL.Size = UDim2.new(0, 50, 0, 14); valueL.Position = UDim2.new(1, -58, 0, 34)
     valueL.BackgroundTransparency = 1; valueL.Text = tostring(CONFIG.DEFAULT)
     valueL.TextColor3 = GREEN; valueL.Font = Enum.Font.GothamBold
     valueL.TextSize = 10; valueL.TextXAlignment = Enum.TextXAlignment.Center; valueL.Parent = card
 
-    -- TRACK
+    -- ── TRACK ─────────────────────────────────────────
     local track = Instance.new("Frame")
     track.Size = UDim2.new(1, -22, 0, 5); track.Position = UDim2.new(0, 10, 0, 56)
     track.BackgroundColor3 = THEME.BG_HOVER; track.BorderSizePixel = 0
@@ -122,37 +130,39 @@ function FastSpeed.build(page, UI)
     knob.AutoButtonColor = false; knob.Parent = track
     corner(knob, 8); stroke(knob, GREEN, 2, 0)
 
-    -- MIN / MAX LABELS
+    -- ── MIN / MAX LABELS ──────────────────────────────
     local minL = Instance.new("TextLabel")
-    minL.Size = UDim2.new(0, 20, 0, 12); minL.Position = UDim2.new(0, 10, 0, 68)
-    minL.BackgroundTransparency = 1; minL.Text = "80"
+    minL.Size = UDim2.new(0, 25, 0, 12); minL.Position = UDim2.new(0, 10, 0, 68)
+    minL.BackgroundTransparency = 1; minL.Text = "100"
     minL.TextColor3 = THEME.TEXT_MUTED; minL.Font = Enum.Font.Gotham
     minL.TextSize = 8; minL.TextXAlignment = Enum.TextXAlignment.Left; minL.Parent = card
 
     local maxL = Instance.new("TextLabel")
     maxL.Size = UDim2.new(0, 25, 0, 12); maxL.Position = UDim2.new(1, -33, 0, 68)
-    maxL.BackgroundTransparency = 1; maxL.Text = "110"
+    maxL.BackgroundTransparency = 1; maxL.Text = "450"
     maxL.TextColor3 = THEME.TEXT_MUTED; maxL.Font = Enum.Font.Gotham
     maxL.TextSize = 8; maxL.TextXAlignment = Enum.TextXAlignment.Right; maxL.Parent = card
 
-    -- SLIDER LOGIC — snap ke step 80/90/100/110
-    local STEPS = {80, 90, 100, 110}
-
+    -- ── SLIDER LOGIC — snap tiap 10 (100,110,120,...,450) ──
     local function snapToStep(raw)
-        local closest, closestDist = STEPS[1], math.huge
-        for _, v in ipairs(STEPS) do
-            local d = math.abs(v - raw)
-            if d < closestDist then closest = v; closestDist = d end
-        end
-        return closest
+        -- Snap ke kelipatan 10 terdekat
+        return math.clamp(math.floor((raw + 5) / 10) * 10, CONFIG.MIN_SPEED, CONFIG.MAX_SPEED)
     end
 
     local function applySlider(speed)
+        speed        = snapToStep(speed)
         currentSpeed = speed
-        local pct = (speed - CONFIG.MIN_SPEED) / (CONFIG.MAX_SPEED - CONFIG.MIN_SPEED)
-        fill.Size     = UDim2.new(pct, 0, 1, 0)
-        knob.Position = UDim2.new(pct, -8, 0.5, -8)
-        valueL.Text   = tostring(speed)
+        local col    = getSpeedColor(speed)
+        local pct    = (speed - CONFIG.MIN_SPEED) / (CONFIG.MAX_SPEED - CONFIG.MIN_SPEED)
+
+        fill.Size          = UDim2.new(pct, 0, 1, 0)
+        knob.Position      = UDim2.new(pct, -8, 0.5, -8)
+        valueL.Text        = tostring(speed)
+        valueL.TextColor3  = col
+        fill.BackgroundColor3 = col
+        -- Update stroke knob tanpa rebuild UIStroke
+        local ks = knob:FindFirstChildOfClass("UIStroke")
+        if ks then ks.Color = col end
     end
 
     local sliderDrag = false
@@ -162,7 +172,7 @@ function FastSpeed.build(page, UI)
             0, 1
         )
         local rawSpeed = pct * (CONFIG.MAX_SPEED - CONFIG.MIN_SPEED) + CONFIG.MIN_SPEED
-        applySlider(snapToStep(rawSpeed))
+        applySlider(rawSpeed)
     end
 
     knob.InputBegan:Connect(function(i)
@@ -186,20 +196,20 @@ function FastSpeed.build(page, UI)
         end
     end)
 
-    -- BADGE TOGGLE
+    -- ── BADGE TOGGLE ──────────────────────────────────
     local function updateBadge()
         if isEnabled then
-            tween(card, 0.2, {BackgroundColor3 = Color3.fromRGB(10, 30, 15)}):Play()
-            tween(accentBar, 0.2, {BackgroundColor3 = GREEN}):Play()
-            tween(badge, 0.2, {BackgroundColor3 = GREEN}):Play()
-            tween(knob, 0.15, {BackgroundColor3 = GREEN}):Play()
+            tween(card,      0.2,  {BackgroundColor3 = Color3.fromRGB(10, 30, 15)}):Play()
+            tween(accentBar, 0.2,  {BackgroundColor3 = GREEN}):Play()
+            tween(badge,     0.2,  {BackgroundColor3 = GREEN}):Play()
+            tween(knob,      0.15, {BackgroundColor3 = GREEN}):Play()
             badge.Text = "ON"; badge.TextColor3 = WHITE
             stroke(card, GREEN, 1, 0.3)
         else
-            tween(card, 0.2, {BackgroundColor3 = THEME.BG_CARD}):Play()
-            tween(accentBar, 0.2, {BackgroundColor3 = THEME.TEXT_MUTED}):Play()
-            tween(badge, 0.2, {BackgroundColor3 = Color3.fromRGB(40, 40, 55)}):Play()
-            tween(knob, 0.15, {BackgroundColor3 = WHITE}):Play()
+            tween(card,      0.2,  {BackgroundColor3 = THEME.BG_CARD}):Play()
+            tween(accentBar, 0.2,  {BackgroundColor3 = THEME.TEXT_MUTED}):Play()
+            tween(badge,     0.2,  {BackgroundColor3 = Color3.fromRGB(40, 40, 55)}):Play()
+            tween(knob,      0.15, {BackgroundColor3 = WHITE}):Play()
             badge.Text = "OFF"; badge.TextColor3 = THEME.TEXT_MUTED
             stroke(card, THEME.BORDER, 1, 0)
         end
@@ -212,13 +222,13 @@ function FastSpeed.build(page, UI)
     end)
 
     player.CharacterRemoving:Connect(stopSpeedLoop)
+    player.CharacterAdded:Connect(function()
+        if isEnabled then
+            task.wait(0.5)
+            startSpeedLoop()
+        end
+    end)
 
-player.CharacterAdded:Connect(function()
-    if isEnabled then
-        task.wait(0.5) -- tunggu karakter fully loaded
-        startSpeedLoop()
-    end
-end)
     applySlider(CONFIG.DEFAULT)
 end
 
