@@ -1,6 +1,6 @@
 -- ╔══════════════════════════════════════════╗
 -- ║     TIOO BETA V1 — HITBOX TAB            ║
--- ║   ESP Box & Invisible Hitbox (All Games) ║
+-- ║   ESP Box & Local Hitbox Visualizer      ║
 -- ╚══════════════════════════════════════════╝
 
 local function init(page, THEME, tween, corner, stroke, mainGui)
@@ -19,7 +19,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     local hitboxSize    = 1
     local renderConn    = nil
     local espCache      = {}
-    -- espCache[p] = { box = Drawing, hbPart = Part or nil }
+    -- espCache[p] = { box = Drawing, hbPart = BoxHandleAdornment or nil }
 
     local function getBoxColor(val)
         if val <= 1 then return WHITE
@@ -28,8 +28,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     end
 
     -- ═══════════════════════════════════════════════════════════════
-    -- HITBOX PART — di-parent ke workspace, CFrame di-set tiap frame
-    -- Tidak bisa di-destroy oleh game karena bukan child HRP/karakter
+    -- Local visualizer. A client-created object cannot change server damage.
     -- ═══════════════════════════════════════════════════════════════
     local HTAG = "_TiooHB_"
 
@@ -40,16 +39,15 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
             return entry.hbPart
         end
         -- Buat baru
-        local hb            = Instance.new("Part")
+        local hb            = Instance.new("BoxHandleAdornment")
         hb.Name             = HTAG .. p.Name
-        hb.Anchored         = true          -- anchored → tidak kena physics
-        hb.CanCollide       = false
-        hb.CanTouch         = true          -- touch detection tetap aktif
-        hb.Massless         = true
-        hb.Transparency     = 1
-        hb.CastShadow       = false
+        hb.Adornee          = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+        hb.AlwaysOnTop      = true
+        hb.ZIndex            = 5
+        hb.Transparency     = 0.75
+        hb.Color3            = ORANGE
         hb.Size             = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
-        hb.Parent           = workspace     -- parent workspace, bukan HRP
+        hb.Parent           = workspace
         entry.hbPart        = hb
         return hb
     end
@@ -115,11 +113,12 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
                 local hum  = char and char:FindFirstChildOfClass("Humanoid")
 
                 if hrp and hum and hum.Health > 0 then
-                    -- Update hitbox part (anchored, ikuti HRP tiap frame)
+                    -- Update local visual hitbox. It does not affect server combat.
                     local hb = getOrCreateHBPart(p)
                     if hb then
                         hb.Size    = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
-                        hb.CFrame  = hrp.CFrame   -- tempel ke posisi HRP
+                        hb.Adornee = hrp
+                        hb.Color3  = col
                     end
 
                     -- ESP Drawing
@@ -207,7 +206,7 @@ local function init(page, THEME, tween, corner, stroke, mainGui)
     descL.Size               = UDim2.new(1, -110, 0, 11)
     descL.Position           = UDim2.new(0, 42, 0, 26)
     descL.BackgroundTransparency = 1
-    descL.Text               = "Invisible hitbox — works on all games"
+    descL.Text               = "Local visualizer — server damage unchanged"
     descL.TextColor3         = THEME.TEXT_MUTED
     descL.Font               = Enum.Font.Gotham
     descL.TextSize           = 7
