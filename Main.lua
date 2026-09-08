@@ -30,13 +30,7 @@ local ok3, FastSpeed = pcall(function()
 end)
 if not ok3 then warn("❌ Fastspeed.lua:", FastSpeed) return end
 
-local ok4, MeleHitbox = pcall(function()
-    return loadstring(game:HttpGet(BASE_URL .. "MeleHitbox.lua"))()
-end)
-if not ok4 then warn("❌ MeleHitbox.lua:", MeleHitbox) return end
-
 task.wait(0.1)
 
 Hitbox.init(UI.hitboxPage, UI.THEME, UI.tween, UI.corner, UI.stroke, UI.mainGui)
-MeleHitbox.init(UI.hitboxPage, UI.THEME, UI.tween, UI.corner, UI.stroke, UI.mainGui)
 FastSpeed.build(UI.mainPage, UI)
